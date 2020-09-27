@@ -6,7 +6,8 @@ $app = new classes\App(
 	10000,
 	10,
 	10000,
-	0
+	10,
+	100
 );
 
 $start_time = microtime(true);

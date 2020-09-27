@@ -21,7 +21,8 @@ class App {
 	 * @var StackPool
 	 */
 	protected $stackPool;
-	protected $interval; # in ms
+	protected $processing_interval; # in ms
+	protected $clean_interval; # in ms
 
 	/**
 	 * App constructor.
@@ -29,20 +30,23 @@ class App {
 	 * @param int $MAX_MESSAGES
 	 * @param int $CLIENT_MESSAGES_MAX_BATCH_SIZE
 	 * @param int $MAX_PROCS
-	 * @param int $interval
+	 * @param int $processing_interval
+	 * @param int $clean_interval
 	 */
 	public function __construct(
 		$CLIENTS_COUNT = 10,
 		$MAX_MESSAGES = 100,
 		$CLIENT_MESSAGES_MAX_BATCH_SIZE = 5,
 		$MAX_PROCS = 5,
-		$interval = 0
+		$processing_interval = 0,
+		$clean_interval = 100
 	) {
 		$this->CLIENTS_COUNT = $CLIENTS_COUNT;
 		$this->MAX_MESSAGES = $MAX_MESSAGES;
 		$this->CLIENT_MESSAGES_MAX_BATCH_SIZE = $CLIENT_MESSAGES_MAX_BATCH_SIZE;
 		$this->MAX_PROCS = $MAX_PROCS;
-		$this->interval = $interval;
+		$this->processing_interval = $processing_interval;
+		$this->clean_interval = $clean_interval;
 	}
 
 	public function run() {
@@ -77,7 +81,7 @@ class App {
 	}
 
 	public function process() {
-		$this->processPool = new ProcessPool($this->MAX_PROCS);
+		$this->processPool = new ProcessPool($this->MAX_PROCS, $this->clean_interval);
 		$this->stackPool = new StackPool();
 		$this->processPool->log(0, 'Start', 0x0);
 		while ($this->messages_queue->count()) {
@@ -121,9 +125,9 @@ class App {
 	}
 
 	protected function processStackPool() {
-		if ($this->interval) {
-			$this->processPool->log(1, 'Waiting for ' . $this->interval . ' ms for the next try');
-			usleep($this->interval * 1000);
+		if ($this->processing_interval) {
+			$this->processPool->log(1, 'Waiting for ' . $this->processing_interval . ' ms for the next try');
+			usleep($this->processing_interval * 1000);
 		}
 		$stackIds = $this->stackPool->getStackIds();
 		$this->processPool->log(0, 'Processing stack: ' . json_encode($stackIds));

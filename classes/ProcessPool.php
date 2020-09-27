@@ -6,18 +6,21 @@ class ProcessPool {
 
 	protected $pool = []; # keys = clients' Ids
 	protected $MAX_COUNT;
+	protected $clean_interval; # in ms
 	#public const PROCESS_MESSAGE_RESULT_UNKNOWN = -1;
 	public const PROCESS_MESSAGE_RESULT_SUCCESS = 0;
 	public const PROCESS_MESSAGE_RESULT_POOL_FULL = 1;
 	public const PROCESS_MESSAGE_RESULT_HAS_PROCESS_FOR_CLIENT = 2;
-	
+
 	/**
 	 * ProcessPool constructor.
 	 * @param int $MAX_PROCS
+	 * @param int $clean_interval
 	 * @param string $log_file
 	 */
-	public function __construct(int $MAX_PROCS, $log_file = './pool.log') {
+	public function __construct(int $MAX_PROCS, $clean_interval, $log_file = './pool.log') {
 		$this->MAX_COUNT = $MAX_PROCS;
+		$this->clean_interval = $clean_interval;
 		$this->log_file = $log_file;
 	}
 
@@ -31,9 +34,9 @@ class ProcessPool {
 		if ($result === self::PROCESS_MESSAGE_RESULT_SUCCESS) {
 			if ($this->addProcessSlot($message)) {
 				$result = self::PROCESS_MESSAGE_RESULT_SUCCESS;
+				$this->log(1, 'Process slot created, process started');
 			}
 		}
-		$this->log(1,$result ? 'Message process started OK' : 'Cannot process message');
 		return $result;
 	}
 
@@ -113,22 +116,22 @@ class ProcessPool {
 			}
 		}
 		if ($wait && $this->count()) {
-			$interval = 1;
-			$this->log(1, 'Found '.$this->count().' working processes, waiting for '.$interval.' seconds for next try ...');
-			sleep(1);
+			$this->log(1, 'Found '.$this->count().' working processes, waiting for '.$this->clean_interval.' ms for the next try ...');
+			usleep($this->clean_interval * 1000);
 			$this->cleanAllSlots($wait);
 		}
 	}
 
-	protected function removeProcessSlot($clientId)
-	{
+	protected function removeProcessSlot($clientId) {
 		/** @var Process $process */
 		$process = $this->pool[$clientId];
 		if ($process) {
 			$process->close();
+			$this->log(2, 'Process for client '.$clientId.' terminated');
 		}
 		if (array_key_exists($clientId, $this->pool)) {
 			unset($this->pool[$clientId]);
+			$this->log(2, 'Process slot for client '.$clientId.' cleaned');
 		}
 	}
 }
