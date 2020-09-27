@@ -5,10 +5,18 @@ use Exception;
 
 class App {
 
-	private $CLIENTS_COUNT;
-	private $MAX_MESSAGES;
-	private $CLIENT_MESSAGES_MAX_BATCH_SIZE;
-	private $MAX_PROCS;
+	protected $CLIENTS_COUNT;
+	protected $MAX_MESSAGES;
+	protected $CLIENT_MESSAGES_MAX_BATCH_SIZE;
+	protected $MAX_PROCS;
+	/**
+	 * @var Queue
+	 */
+	protected $messages_queue;
+	/**
+	 * @var ProcessPool
+	 */
+	protected $pool;
 
 	/**
 	 * App constructor.
@@ -35,7 +43,7 @@ class App {
 	}
 
 	public function fillQueue() {
-		$messages_queue = new Queue();
+		$this->messages_queue = new Queue();
 		$clientIdx = 0; # first = 1, no clients array, just numbers
 		$cnt = 0;
 		do {
@@ -49,18 +57,30 @@ class App {
 				$batch_size = $this->MAX_MESSAGES - $cnt;
 			}
 			for ($i = 1; $i <= $batch_size; ++$i) {
-				$messages_queue->addMessage(new Message(
+				$this->messages_queue->addMessage(new Message(
 					$clientIdx,
 					microtime(true),
 					'message ' . ($cnt + 1)
 				));
-				$cnt = $messages_queue->count();
+				$cnt = $this->messages_queue->count();
 			}
 		} while ($cnt < $this->MAX_MESSAGES);
-		$messages_queue->log('./queue.log');
+		$this->messages_queue->log_queue();
 	}
 
 	public function processQueue() {
-
+		$this->pool = new ProcessPool($this->MAX_PROCS);
+		while ($this->messages_queue->count() > 0) {
+			$message = $this->messages_queue->getMessage();
+			echo 'Processing message: '.json_encode($message)."\n";
+			while (!$this->pool->processMessage($message)) {
+				$interval = 500;
+				$this->pool->log(1,'Waiting for '.$interval.' ms for the next try');
+				if ($interval) {
+					usleep($interval * 1000);
+				}
+			}
+		}
+		$this->pool->cleanAllSlots(true);
 	}
 }
