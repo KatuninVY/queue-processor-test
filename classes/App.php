@@ -16,7 +16,12 @@ class App {
 	/**
 	 * @var ProcessPool
 	 */
-	protected $pool;
+	protected $processPool;
+	/**
+	 * @var StackPool
+	 */
+	protected $stackPool;
+	protected $interval; # in ms
 
 	/**
 	 * App constructor.
@@ -24,22 +29,25 @@ class App {
 	 * @param int $MAX_MESSAGES
 	 * @param int $CLIENT_MESSAGES_MAX_BATCH_SIZE
 	 * @param int $MAX_PROCS
+	 * @param int $interval
 	 */
 	public function __construct(
 		$CLIENTS_COUNT = 10,
 		$MAX_MESSAGES = 100,
 		$CLIENT_MESSAGES_MAX_BATCH_SIZE = 5,
-		$MAX_PROCS = 5
+		$MAX_PROCS = 5,
+		$interval = 0
 	) {
 		$this->CLIENTS_COUNT = $CLIENTS_COUNT;
 		$this->MAX_MESSAGES = $MAX_MESSAGES;
 		$this->CLIENT_MESSAGES_MAX_BATCH_SIZE = $CLIENT_MESSAGES_MAX_BATCH_SIZE;
 		$this->MAX_PROCS = $MAX_PROCS;
+		$this->interval = $interval;
 	}
 
 	public function run() {
 		$this->fillQueue();
-		$this->processQueue();
+		$this->process();
 	}
 
 	public function fillQueue() {
@@ -68,19 +76,63 @@ class App {
 		$this->messages_queue->log_queue();
 	}
 
-	public function processQueue() {
-		$this->pool = new ProcessPool($this->MAX_PROCS);
-		while ($this->messages_queue->count() > 0) {
-			$message = $this->messages_queue->getMessage();
-			echo 'Processing message: '.json_encode($message)."\n";
-			while (!$this->pool->processMessage($message)) {
-				$interval = 500;
-				$this->pool->log(1,'Waiting for '.$interval.' ms for the next try');
-				if ($interval) {
-					usleep($interval * 1000);
-				}
+	public function process() {
+		$this->processPool = new ProcessPool($this->MAX_PROCS);
+		$this->stackPool = new StackPool();
+		$this->processPool->log(0, 'Start', 0x0);
+		while ($this->messages_queue->count()) {
+			$this->processQueue();
+		}
+		while ($this->stackPool->count()) {
+			$this->processStackPool();
+		}
+		$this->processPool->cleanAllSlots(true);
+	}
+
+	protected function processQueue(){
+		$message = $this->messages_queue->getMessage();
+		echo 'Processing message from queue: ' . json_encode($message) . "\n";
+		if ($this->stackPool->checkStackExists($message->clientId)) { # found stack for client
+			$this->processPool->log(1, 'Found stack for client ' . $message->clientId);
+			$this->stackPool->addMessage($message);
+			echo "\tMoved message to stack\n";
+			$this->processPool->log(1, 'Moved message to stack');
+			if ($this->processPool->canProcessMessageForClient($message->clientId) === $this->processPool::PROCESS_MESSAGE_RESULT_SUCCESS) {
+				$this->processPool->log(1, 'Found completed process slot for client ' . $message->clientId);
+				$message = $this->stackPool->getMessage($message->clientId);
+				echo 'Processing message from stack: ' . json_encode($message) . "\n";
+			}
+			else {
+				return;
 			}
 		}
-		$this->pool->cleanAllSlots(true);
+		else { # no stack for client
+			if ($this->processPool->canProcessMessageForClient($message->clientId) === $this->processPool::PROCESS_MESSAGE_RESULT_HAS_PROCESS_FOR_CLIENT) {
+				$this->stackPool->addMessage($message);
+				echo "\tMoved message to stack\n";
+				return;
+			}
+		}
+		while ($this->processPool->processMessage($message) !== $this->processPool::PROCESS_MESSAGE_RESULT_SUCCESS) {
+			if ($this->stackPool->count()) {
+				$this->processStackPool();
+			}
+		}
+	}
+
+	protected function processStackPool() {
+		if ($this->interval) {
+			$this->processPool->log(1, 'Waiting for ' . $this->interval . ' ms for the next try');
+			usleep($this->interval * 1000);
+		}
+		$stackIds = $this->stackPool->getStackIds();
+		$this->processPool->log(0, 'Processing stack: ' . json_encode($stackIds));
+		foreach ($stackIds as $clientId) {
+			if ($this->processPool->canProcessMessageForClient($clientId) === $this->processPool::PROCESS_MESSAGE_RESULT_SUCCESS) {
+				$message = $this->stackPool->getMessage($clientId);
+				echo 'Processing message from stack: ' . json_encode($message) . "\n";
+				$this->processPool->processMessage($message);
+			}
+		}
 	}
 }

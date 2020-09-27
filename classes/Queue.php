@@ -19,7 +19,7 @@ class Queue {
 	}
 
 	/**
-	 * @param $message Message
+	 * @param $message mixed
 	 */
 	public function addMessage($message) {
 		$this->queue[] = $message;

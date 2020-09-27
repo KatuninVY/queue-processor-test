@@ -5,15 +5,19 @@ class ProcessPool {
 	use Log;
 
 	protected $pool = []; # keys = clients' Ids
-	protected $MAX_PROCS;
-
+	protected $MAX_COUNT;
+	#public const PROCESS_MESSAGE_RESULT_UNKNOWN = -1;
+	public const PROCESS_MESSAGE_RESULT_SUCCESS = 0;
+	public const PROCESS_MESSAGE_RESULT_POOL_FULL = 1;
+	public const PROCESS_MESSAGE_RESULT_HAS_PROCESS_FOR_CLIENT = 2;
+	
 	/**
 	 * ProcessPool constructor.
 	 * @param int $MAX_PROCS
 	 * @param string $log_file
 	 */
 	public function __construct(int $MAX_PROCS, $log_file = './pool.log') {
-		$this->MAX_PROCS = $MAX_PROCS;
+		$this->MAX_COUNT = $MAX_PROCS;
 		$this->log_file = $log_file;
 	}
 
@@ -22,36 +26,44 @@ class ProcessPool {
 	}
 
 	public function processMessage(Message $message) {
-		$result = false;
 		$this->log(0,'Processing message: '.json_encode($message));
-		if ($this->canProcessMessage($message)) {
+		$result = $this->canProcessMessageForClient($message->clientId);
+		if ($result === self::PROCESS_MESSAGE_RESULT_SUCCESS) {
 			if ($this->addProcessSlot($message)) {
-				$result = true;
+				$result = self::PROCESS_MESSAGE_RESULT_SUCCESS;
 			}
 		}
-		$this->log(1,$result ? 'Message processing started OK' : 'Cannot process message');
+		$this->log(1,$result ? 'Message process started OK' : 'Cannot process message');
 		return $result;
 	}
 
-	protected function canProcessMessage(Message $message) {
-		$this->log(1,'Checking pool');
-		if (array_key_exists($message->clientId, $this->pool)) {
-			$this->log(2, 'Already have slot with process for clientId '.$message->clientId.', trying to clean');
-			$this->checkAndCleanSlot($message->clientId);
+	public function canProcessMessageForClient($clientId) {
+		$this->log(1,'Checking pool for client '.$clientId);
+		if (array_key_exists($clientId, $this->pool)) {
+			$this->log(2, 'Already have slot with process for clientId '.$clientId.', trying to clean');
+			$this->checkAndCleanSlot($clientId);
 		}
 		if (
-			!array_key_exists($message->clientId, $this->pool)
-			&& ($this->count() == $this->MAX_PROCS)
+			!array_key_exists($clientId, $this->pool)
+			&& ($this->count() == $this->MAX_COUNT)
 		) {
 			$this->log(2, 'No available slots found, trying to clean all');
 			$this->cleanAllSlots();
 		}
-		$result =
-			!array_key_exists($message->clientId, $this->pool)
-			&&
-			($this->count() < $this->MAX_PROCS)
-		;
-		$this->log(2, $result ? 'Found free process slot' : 'No available slots found');
+		switch(true) {
+			case array_key_exists($clientId, $this->pool):
+				$result = self::PROCESS_MESSAGE_RESULT_HAS_PROCESS_FOR_CLIENT;
+				$description = 'Process slot for client '.$clientId.' is busy';
+				break;
+			case $this->count() == $this->MAX_COUNT:
+				$result = self::PROCESS_MESSAGE_RESULT_POOL_FULL;
+				$description = 'Process pool is full';
+				break;
+			default:
+				$description = 'Found free process slot';
+				$result = self::PROCESS_MESSAGE_RESULT_SUCCESS;
+		}
+		$this->log(2, $description);
 		return $result;
 	}
 
@@ -67,14 +79,21 @@ class ProcessPool {
 	}
 
 	protected function checkAndCleanSlot($clientId) {
+		$result = false;
 		/** @var Process $process */
-		$process = $this->pool[$clientId];
+		$process = array_key_exists($clientId, $this->pool) ? $this->pool[$clientId] : false;
 		if (!empty($process)) {
 			$state = proc_get_status($process->pid);
 			if ($state['running'] === false) {
 				$this->removeProcessSlot($clientId);
+				$result = true;
 			}
 		}
+		else {
+			$this->removeProcessSlot($clientId);
+			$result = $this->count() < $this->MAX_COUNT;
+		}
+		return $result;
 	}
 
 	public function cleanAllSlots($wait = false) {
@@ -101,10 +120,15 @@ class ProcessPool {
 		}
 	}
 
-	protected function removeProcessSlot($clientId) {
+	protected function removeProcessSlot($clientId)
+	{
 		/** @var Process $process */
 		$process = $this->pool[$clientId];
-		$process->close();
-		unset($this->pool[$clientId]);
+		if ($process) {
+			$process->close();
+		}
+		if (array_key_exists($clientId, $this->pool)) {
+			unset($this->pool[$clientId]);
+		}
 	}
 }
