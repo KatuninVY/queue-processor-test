@@ -95,16 +95,16 @@ class App {
 
 	protected function processQueue(){
 		$message = $this->messages_queue->getMessage();
-		echo 'Processing message from queue: ' . json_encode($message) . "\n";
+		static::say('Processing message from queue: ' . json_encode($message) . "\n");
 		if ($this->stackPool->checkStackExists($message->clientId)) { # found stack for client
 			$this->processPool->log(1, 'Found stack for client ' . $message->clientId);
 			$this->stackPool->addMessage($message);
-			echo "\tMoved message to stack\n";
+			static::say("\tMoved message to stack\n");
 			$this->processPool->log(1, 'Moved message to stack');
 			if ($this->processPool->canProcessMessageForClient($message->clientId) === $this->processPool::PROCESS_MESSAGE_RESULT_SUCCESS) {
 				$this->processPool->log(1, 'Found completed process slot for client ' . $message->clientId);
 				$message = $this->stackPool->getMessage($message->clientId);
-				echo 'Processing message from stack: ' . json_encode($message) . "\n";
+				static::say('Processing message from stack: ' . json_encode($message) . "\n");
 			}
 			else {
 				return;
@@ -113,7 +113,7 @@ class App {
 		else { # no stack for client
 			if ($this->processPool->canProcessMessageForClient($message->clientId) === $this->processPool::PROCESS_MESSAGE_RESULT_HAS_PROCESS_FOR_CLIENT) {
 				$this->stackPool->addMessage($message);
-				echo "\tMoved message to stack\n";
+				static::say("\tMoved message to stack\n");
 				return;
 			}
 		}
@@ -134,9 +134,13 @@ class App {
 		foreach ($stackIds as $clientId) {
 			if ($this->processPool->canProcessMessageForClient($clientId) === $this->processPool::PROCESS_MESSAGE_RESULT_SUCCESS) {
 				$message = $this->stackPool->getMessage($clientId);
-				echo 'Processing message from stack: ' . json_encode($message) . "\n";
+				static::say('Processing message from stack: ' . json_encode($message) . "\n");
 				$this->processPool->processMessage($message);
 			}
 		}
+	}
+
+	public function say($msg) {
+		echo $msg;
 	}
 }
